@@ -1,0 +1,31 @@
+[package]
+name = "azur-promilia-lua-dumper"
+version = "0.1.0"
+edition = "2021"
+description = "Azur Promilia (YooAsset/UnityFS/XLua) Lua static + read-only mem dumper"
+license = "MIT"
+
+[[bin]]
+name = "azur-promilia-lua-dumper"
+path = "src/main.rs"
+
+[dependencies]
+aes = "0.9"
+anyhow = "1"
+base64 = "0.23"
+byteorder = "1"
+clap = { version = "4", features = ["derive"] }
+crypto-bigint = "0.7"
+flate2 = "1"
+hex = "0.4"
+lz4_flex = "0.14"
+memchr = "2"
+rsa = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.11"
+sha2 = "0.11"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
