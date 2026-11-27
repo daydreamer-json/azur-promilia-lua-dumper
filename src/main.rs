@@ -32,7 +32,7 @@ enum Cmd {
         /// UnityCN bundle password (16 chars). Falls back to built-in.
         #[arg(long)]
         decrypt_key: Option<String>,
-        /// Also run external decompilers on bytecode.
+        /// Also decompile bytecode with the built-in engine.
         #[arg(long, default_value_t = false)]
         decompile: bool,
     },

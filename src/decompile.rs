@@ -1,11 +1,6 @@
-//! Lua bytecode detection + optional external decompilation.
-//!
-//! Rust does not reimplement a Lua decompiler here; this module detects
-//! the bytecode version from the header and shells out to a user-supplied
-//! tool (`unluac`, `luadec`, ...) when `--decompile` is passed.
+//! Lua bytecode detection + built-in decompilation (unluac-rs).
 
-use anyhow::Result;
-use std::process::Command;
+use anyhow::{Context, Result};
 
 /// Bytecode flavor detected from the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,32 +57,27 @@ pub fn classify_bytecode(data: &[u8]) -> Bytecode {
     }
 }
 
-/// Try external decompilers in order; returns decompiled text on success.
+/// Decompile Lua bytecode with the bundled unluac-rs engine.
+/// Returns decompiled source text on success.
 pub fn try_decompile(bytecode: &[u8], flavor: Bytecode) -> Result<String> {
-    // shortcut: no bundled decompiler; delegate to tools the user installed.
-    // unluac handles 5.1-5.4 (these chunks are standard 5.3, no typemap needed).
-    let dir = std::env::temp_dir();
-    let tmp = dir.join(format!("azur-promilia-lua-dumper-{}.lub", std::process::id()));
-    std::fs::write(&tmp, bytecode)?;
-    let tmp_s = tmp.to_string_lossy().into_owned();
-    let mut argv: Vec<Vec<String>> = Vec::new();
-    if let Ok(jar) = std::env::var("UNLUAC_JAR") {
-        argv.push(vec!["java".into(), "-jar".into(), jar, tmp_s.clone()]);
-    }
-    for tool in ["unluac", "luadec"] {
-        argv.push(vec![tool.into(), tmp_s.clone()]);
-    }
-    let _ = flavor;
-    for args in &argv {
-        if let Ok(out) = Command::new(&args[0]).args(&args[1..]).output() {
-            if out.status.success() && !out.stdout.is_empty() {
-                let _ = std::fs::remove_file(&tmp);
-                return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
-            }
-        }
-    }
-    let _ = std::fs::remove_file(&tmp);
-    anyhow::bail!("no working decompiler found (set UNLUAC_JAR or install unluac); kept .lub")
+    use unluac::decompile::{DecompileDialect, DecompileOptions, decompile};
+    use unluac::generate::GenerateMode;
+    let mut options = DecompileOptions::default();
+    options.dialect = match flavor {
+        Bytecode::Lua51 => DecompileDialect::Lua51,
+        Bytecode::Lua53 => DecompileDialect::Lua53,
+        Bytecode::Lua54 => DecompileDialect::Lua54,
+        Bytecode::LuaJit => DecompileDialect::Luajit,
+        Bytecode::Unknown => DecompileDialect::Auto,
+    };
+    // shortcut: permissive keeps bulk runs going on odd chunks.
+    options.generate.mode = GenerateMode::Permissive;
+    let result = decompile(bytecode, options).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    result
+        .state
+        .generated
+        .map(|g| g.source)
+        .context("decompiler produced no output")
 }
 
 #[cfg(test)]
@@ -101,5 +91,12 @@ mod tests {
         assert_eq!(classify_bytecode(b"\x1bLua\x54...."), Bytecode::Lua54);
         assert_eq!(classify_bytecode(b"\x1bLJ....."), Bytecode::LuaJit);
         assert_eq!(classify_bytecode(b"return 1"), Bytecode::Unknown);
+    }
+
+    #[test]
+    fn decompile_rejects_garbage() {
+        // Must fail gracefully (no panic) on non-bytecode.
+        assert!(try_decompile(b"return 1", Bytecode::Unknown).is_err());
+        assert!(try_decompile(&[0u8; 64], Bytecode::Unknown).is_err());
     }
 }
